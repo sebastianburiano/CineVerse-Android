@@ -189,7 +189,4 @@ public class MainActivity extends Activity {
     }
 }
 
-            .setMessage("¿Cambiar servidor?").setPositiveButton("Cambiar", (d,w)->configure())
-            .setNegativeButton("Cancelar", null).show();
-    }
-}
+         
