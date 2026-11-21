@@ -8,6 +8,19 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.view.View;
+import android.view.Gravity;
+import android.widget.Toast;
+import android.webkit.JavascriptInterface;
+import androidx.mediarouter.app.MediaRouteButton;
+import com.google.android.gms.cast.MediaInfo;
+import com.google.android.gms.cast.MediaMetadata;
+import com.google.android.gms.cast.framework.CastButtonFactory;
+import com.google.android.gms.cast.framework.CastContext;
+import com.google.android.gms.cast.framework.CastSession;
+import com.google.android.gms.cast.framework.SessionManagerListener;
+import com.google.android.gms.cast.framework.media.RemoteMediaClient;
+import com.google.android.gms.cast.MediaLoadRequestData;
+import org.json.JSONObject;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ProgressBar;
@@ -25,6 +38,22 @@ public class MainActivity extends Activity {
     private ProgressBar loading;
     private SharedPreferences prefs;
     private View fullscreen;
+    private MediaRouteButton castButton;
+    private FrameLayout fullscreenContainer;
+    private CastContext castContext;
+    private String currentVideoUrl;
+    private String currentVideoTitle = "CineVerse";
+    private final SessionManagerListener<CastSession> castListener = new SessionManagerListener<CastSession>() {
+        @Override public void onSessionStarted(CastSession session, String id) { sendToCast(session); }
+        @Override public void onSessionResumed(CastSession session, boolean wasSuspended) { sendToCast(session); }
+        @Override public void onSessionStarting(CastSession session) {}
+        @Override public void onSessionStartFailed(CastSession session, int error) {}
+        @Override public void onSessionEnding(CastSession session) {}
+        @Override public void onSessionEnded(CastSession session, int error) {}
+        @Override public void onSessionResuming(CastSession session, String id) {}
+        @Override public void onSessionResumeFailed(CastSession session, int error) {}
+        @Override public void onSessionSuspended(CastSession session, int reason) {}
+    };
     private WebChromeClient.CustomViewCallback callback;
 
     private static final String DEFAULT_URL =
@@ -52,6 +81,22 @@ public class MainActivity extends Activity {
             WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
         );
 
+        castContext = CastContext.getSharedInstance(this);
+        web.addJavascriptInterface(new Object() {
+            @JavascriptInterface public void videoFound(String url, String title) {
+                runOnUiThread(() -> {
+                    currentVideoUrl = url;
+                    currentVideoTitle = title;
+                });
+            }
+        }, "CineVerseBridge");
+        castButton = new MediaRouteButton(this);
+        CastButtonFactory.setUpMediaRouteButton(getApplicationContext(), castButton);
+        castButton.setContentDescription("Transmitir a TV (Google Cast)");
+        castButton.setOnClickListener(v -> {
+            scanVideo();
+            castButton.showDialog();
+        });
         loading = new ProgressBar(this);
         FrameLayout.LayoutParams progressParams =
             new FrameLayout.LayoutParams(100, 100);
@@ -59,11 +104,13 @@ public class MainActivity extends Activity {
 
         root.addView(web);
         root.addView(loading, progressParams);
+        addCastButton(root);
 
         web.setWebViewClient(new WebViewClient() {
             @Override
             public void onPageFinished(WebView view, String url) {
                 loading.setVisibility(View.GONE);
+                scanVideo();
             }
 
             @Override
@@ -87,7 +134,11 @@ public class MainActivity extends Activity {
             ) {
                 fullscreen = view;
                 callback = cb;
-                setContentView(view);
+                fullscreenContainer = new FrameLayout(MainActivity.this);
+                fullscreenContainer.setBackgroundColor(Color.BLACK);
+                fullscreenContainer.addView(view);
+                addCastButton(fullscreenContainer);
+                setContentView(fullscreenContainer);
 
                 getWindow().getDecorView()
                     .setSystemUiVisibility(
@@ -98,6 +149,11 @@ public class MainActivity extends Activity {
             @Override
             public void onHideCustomView() {
                 fullscreen = null;
+                if (fullscreenContainer != null) {
+                    fullscreenContainer.removeView(castButton);
+                    fullscreenContainer = null;
+                }
+                addCastButton(root);
                 setContentView(root);
 
                 getWindow().getDecorView()
@@ -118,6 +174,7 @@ public class MainActivity extends Activity {
 
     private void loadServer(String url) {
         loading.setVisibility(View.VISIBLE);
+        currentVideoUrl = null;
         web.loadUrl(url);
     }
 
@@ -167,6 +224,70 @@ public class MainActivity extends Activity {
             })
             .setNegativeButton("Cancelar", null)
             .show();
+    }
+
+    private void addCastButton(FrameLayout parent) {
+        if (castButton.getParent() instanceof android.view.ViewGroup) {
+            ((android.view.ViewGroup)castButton.getParent()).removeView(castButton);
+        }
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(64, 64, Gravity.TOP | Gravity.RIGHT);
+        lp.setMargins(0, 20, 20, 0);
+        parent.addView(castButton, lp);
+        castButton.bringToFront();
+    }
+
+    private void scanVideo() {
+        web.evaluateJavascript("(function(){var v=document.querySelector('video'); if(!v)return ''; return JSON.stringify({url:v.currentSrc||v.src||((v.querySelector('source')||{}).src)||'',title:document.title||'CineVerse'});})()", value -> {
+            try {
+                if (value == null || value.equals("null") || value.equals("\"\"")) return;
+                String decoded = new org.json.JSONTokener(value).nextValue().toString();
+                JSONObject obj = new JSONObject(decoded);
+                String url = obj.optString("url", "");
+                if (!url.isEmpty()) {
+                    currentVideoUrl = new java.net.URI(web.getUrl()).resolve(url).toString();
+                    currentVideoTitle = obj.optString("title", "CineVerse");
+                }
+            } catch (Exception ignored) {}
+        });
+    }
+
+    private void sendToCast(CastSession session) {
+        scanVideo();
+        // evaluateJavascript is asynchronous; wait for its callback before sending.
+        web.evaluateJavascript("(function(){var v=document.querySelector('video');return v?(v.currentSrc||v.src||''):''})()", result -> {
+            try {
+                String url = new org.json.JSONTokener(result).nextValue().toString();
+                if (url.isEmpty()) url = currentVideoUrl;
+                if (url == null || url.isEmpty()) {
+                    Toast.makeText(this, "Abrí una película antes de transmitir", Toast.LENGTH_LONG).show();
+                    return;
+                }
+                url = new java.net.URI(web.getUrl()).resolve(url).toString();
+                if (!url.startsWith("https://")) {
+                    Toast.makeText(this, "La TV necesita una URL HTTPS accesible", Toast.LENGTH_LONG).show();
+                    return;
+                }
+                MediaMetadata metadata = new MediaMetadata(MediaMetadata.MEDIA_TYPE_MOVIE);
+                metadata.putString(MediaMetadata.KEY_TITLE, currentVideoTitle);
+                MediaInfo info = new MediaInfo.Builder(url)
+                    .setStreamType(MediaInfo.STREAM_TYPE_BUFFERED)
+                    .setContentType("video/mp4")
+                    .setMetadata(metadata).build();
+                RemoteMediaClient client = session.getRemoteMediaClient();
+                if (client != null) client.load(new MediaLoadRequestData.Builder().setMediaInfo(info).setAutoplay(true).build());
+            } catch (Exception ex) {
+                Toast.makeText(this, "No se pudo transmitir: " + ex.getMessage(), Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    @Override protected void onResume() {
+        super.onResume();
+        if (castContext != null) castContext.getSessionManager().addSessionManagerListener(castListener, CastSession.class);
+    }
+    @Override protected void onPause() {
+        if (castContext != null) castContext.getSessionManager().removeSessionManagerListener(castListener, CastSession.class);
+        super.onPause();
     }
 
     @Override
