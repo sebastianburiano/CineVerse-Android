@@ -80,8 +80,12 @@ public class MainActivity extends Activity {
         settings.setMixedContentMode(
             WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
         );
-
-        castContext = CastContext.getSharedInstance(this);
+try {
+    castContext = CastContext.getSharedInstance(this);
+} catch (Exception e) {
+    android.util.Log.e("CineVerse", "Error iniciando Google Cast", e);
+    castContext = null;
+}
         web.addJavascriptInterface(new Object() {
             @JavascriptInterface public void videoFound(String url, String title) {
                 runOnUiThread(() -> {
