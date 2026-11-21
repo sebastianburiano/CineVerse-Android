@@ -94,12 +94,9 @@ try {
                 });
             }
         }, "CineVerseBridge");
-        castButton = new MediaRouteButton(this);
-        CastButtonFactory.setUpMediaRouteButton(getApplicationContext(), castButton);
-        castButton.setContentDescription("Transmitir a TV (Google Cast)");
-        castButton.setOnClickListener(v -> {
-            scanVideo();
-            castButton.showDialog();
+        //castButton = new MediaRouteButton(this);
+        //CastButtonFactory.setUpMediaRouteButton(getApplicationContext(), castButton);
+       // Google Cast desactivado temporalmente para diagnosticar el cierre.
         });
         loading = new ProgressBar(this);
         FrameLayout.LayoutParams progressParams =
@@ -141,7 +138,7 @@ try {
                 fullscreenContainer = new FrameLayout(MainActivity.this);
                 fullscreenContainer.setBackgroundColor(Color.BLACK);
                 fullscreenContainer.addView(view);
-                addCastButton(fullscreenContainer);
+                //addCastButton(fullscreenContainer);
                 setContentView(fullscreenContainer);
 
                 getWindow().getDecorView()
@@ -154,10 +151,10 @@ try {
             public void onHideCustomView() {
                 fullscreen = null;
                 if (fullscreenContainer != null) {
-                    fullscreenContainer.removeView(castButton);
+                    //fullscreenContainer.removeView(castButton);
                     fullscreenContainer = null;
                 }
-                addCastButton(root);
+                //addCastButton(root);
                 setContentView(root);
 
                 getWindow().getDecorView()
