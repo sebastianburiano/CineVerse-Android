@@ -1,62 +1,194 @@
+
 package ar.cineverse.app;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.os.Bundle;
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.app.AlertDialog;
+import android.graphics.Color;
+import android.view.View;
 import android.widget.EditText;
+import android.widget.FrameLayout;
+import android.widget.ProgressBar;
 import android.webkit.WebChromeClient;
+import android.webkit.WebResourceError;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
-import android.webkit.WebSettings;
-import android.view.View;
 
 public class MainActivity extends Activity {
+
     private WebView web;
+    private FrameLayout root;
+    private ProgressBar loading;
     private SharedPreferences prefs;
-    @Override public void onCreate(Bundle state) {
+    private View fullscreen;
+    private WebChromeClient.CustomViewCallback callback;
+
+    private static final String DEFAULT_URL =
+        "https://waters-attempting-bali-cedar.trycloudflare.com";
+
+    @Override
+    public void onCreate(Bundle state) {
         super.onCreate(state);
-        prefs = getSharedPreferences("cineverse", Context.MODE_PRIVATE);
+
+        prefs = getSharedPreferences(
+            "cineverse", Context.MODE_PRIVATE
+        );
+
+        root = new FrameLayout(this);
+        root.setBackgroundColor(Color.rgb(9, 11, 18));
+
         web = new WebView(this);
-        web.setBackgroundColor(0xff090b12);
-        web.getSettings().setJavaScriptEnabled(true);
-        web.getSettings().setDomStorageEnabled(true);
-        web.getSettings().setMediaPlaybackRequiresUserGesture(false);
-        web.getSettings().setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
-        web.setWebViewClient(new WebViewClient());
-        web.setWebChromeClient(new WebChromeClient() {
-            private View fullscreen;
-            private android.webkit.WebChromeClient.CustomViewCallback callback;
-            @Override public void onShowCustomView(View view, android.webkit.WebChromeClient.CustomViewCallback cb) {
-                fullscreen = view; callback = cb; setContentView(view);
-                getWindow().getDecorView().setSystemUiVisibility(5894 | 1024 | 512);
+        web.setBackgroundColor(Color.rgb(9, 11, 18));
+
+        WebSettings settings = web.getSettings();
+        settings.setJavaScriptEnabled(true);
+        settings.setDomStorageEnabled(true);
+        settings.setMediaPlaybackRequiresUserGesture(false);
+        settings.setMixedContentMode(
+            WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+        );
+
+        loading = new ProgressBar(this);
+        FrameLayout.LayoutParams progressParams =
+            new FrameLayout.LayoutParams(100, 100);
+        progressParams.gravity = android.view.Gravity.CENTER;
+
+        root.addView(web);
+        root.addView(loading, progressParams);
+
+        web.setWebViewClient(new WebViewClient() {
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                loading.setVisibility(View.GONE);
             }
-            @Override public void onHideCustomView() {
-                fullscreen = null; setContentView(web);
-                getWindow().getDecorView().setSystemUiVisibility(0);
-                if(callback != null) callback.onCustomViewHidden();
+
+            @Override
+            public void onReceivedError(
+                WebView view,
+                WebResourceRequest request,
+                WebResourceError error
+            ) {
+                if (request.isForMainFrame()) {
+                    loading.setVisibility(View.GONE);
+                    showConnectionError();
+                }
             }
         });
-        setContentView(web);
-        String url = prefs.getString("server", "");
-        if(url.isEmpty()) configure(); else web.loadUrl(url);
+
+        web.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public void onShowCustomView(
+                View view,
+                CustomViewCallback cb
+            ) {
+                fullscreen = view;
+                callback = cb;
+                setContentView(view);
+
+                getWindow().getDecorView()
+                    .setSystemUiVisibility(
+                        5894 | 1024 | 512
+                    );
+            }
+
+            @Override
+            public void onHideCustomView() {
+                fullscreen = null;
+                setContentView(root);
+
+                getWindow().getDecorView()
+                    .setSystemUiVisibility(0);
+
+                if (callback != null) {
+                    callback.onCustomViewHidden();
+                    callback = null;
+                }
+            }
+        });
+
+        setContentView(root);
+
+        String url = prefs.getString("server", DEFAULT_URL);
+        loadServer(url);
     }
+
+    private void loadServer(String url) {
+        loading.setVisibility(View.VISIBLE);
+        web.loadUrl(url);
+    }
+
+    private void showConnectionError() {
+        new AlertDialog.Builder(this)
+            .setTitle("CineVerse - Sin conexión")
+            .setMessage(
+                "No se pudo conectar al servidor. " +
+                "Comprobá que CineVerse y Cloudflare " +
+                "estén funcionando."
+            )
+            .setPositiveButton("Reintentar", (d, w) -> {
+                web.reload();
+            })
+            .setNegativeButton("Cambiar servidor", (d, w) -> {
+                configure();
+            })
+            .show();
+    }
+
     private void configure() {
         EditText input = new EditText(this);
         input.setSingleLine(true);
-        input.setText(prefs.getString("server", "http://192.168.1.50:8001"));
-        new AlertDialog.Builder(this).setTitle("Servidor CineVerse")
-            .setMessage("Ingresá la dirección accesible desde tu teléfono (puerto 8001). Para datos móviles, usá una URL HTTPS segura.")
-            .setView(input).setCancelable(false)
-            .setPositiveButton("Conectar", (dialog, which) -> {
-                String url = input.getText().toString().trim();
-                if(!url.startsWith("http://") && !url.startsWith("https://")) url = "http://" + url;
-                prefs.edit().putString("server", url).apply(); web.loadUrl(url);
-            }).show();
+
+        input.setText(
+            prefs.getString("server", DEFAULT_URL)
+        );
+
+        new AlertDialog.Builder(this)
+            .setTitle("Servidor CineVerse")
+            .setMessage("Ingresá la dirección HTTPS del servidor.")
+            .setView(input)
+            .setPositiveButton("Conectar", (d, w) -> {
+                String url = input.getText()
+                    .toString().trim();
+
+                if (!url.startsWith("http://") &&
+                    !url.startsWith("https://")) {
+                    url = "https://" + url;
+                }
+
+                prefs.edit()
+                    .putString("server", url)
+                    .apply();
+
+                loadServer(url);
+            })
+            .setNegativeButton("Cancelar", null)
+            .show();
     }
-    @Override public void onBackPressed() {
-        if(web.canGoBack()) web.goBack(); else new AlertDialog.Builder(this)
+
+    @Override
+    public void onBackPressed() {
+        if (fullscreen != null) {
+            web.getWebChromeClient().onHideCustomView();
+        } else if (web.canGoBack()) {
+            web.goBack();
+        } else {
+            configure();
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (web != null) {
+            web.destroy();
+        }
+        super.onDestroy();
+    }
+}
+
             .setMessage("¿Cambiar servidor?").setPositiveButton("Cambiar", (d,w)->configure())
             .setNegativeButton("Cancelar", null).show();
     }
