@@ -94,10 +94,7 @@ try {
                 });
             }
         }, "CineVerseBridge");
-        //castButton = new MediaRouteButton(this);
-        //CastButtonFactory.setUpMediaRouteButton(getApplicationContext(), castButton);
-       // Google Cast desactivado temporalmente para diagnosticar el cierre.
-        });
+        // Google Cast desactivado temporalmente.
         loading = new ProgressBar(this);
         FrameLayout.LayoutParams progressParams =
             new FrameLayout.LayoutParams(100, 100);
